@@ -5,32 +5,32 @@ import pandas as pd
 import numpy as np
 import datetime
 import asyncio
-import telegram
+from telegram import Bot
 
 # —————— 0) .env DOSYASINI YÜKLE ——————
 load_dotenv()
 
-# —————— DEBUG (doğru okuyup okumadığını kontrol et) ——————
-print("📣 Çalışma dizini:", os.getcwd())
-print("📣 Dosyalar:", os.listdir())
-print("📣 TOKEN env’den:", os.getenv("TELEGRAM_BOT_TOKEN"))
-print("📣 CHAT_ID env’den:", os.getenv("TELEGRAM_CHAT_ID"))
-print("📣 ETHERSCAN_API_KEY env’den:", os.getenv("ETHERSCAN_API_KEY"))
-
 # —————— 1) AYARLAR ——————
-TOKEN             = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID           = int(os.getenv("TELEGRAM_CHAT_ID") or 0)
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
+TOKEN             = os.getenv("TELEGRAM_BOT_TOKEN", "")
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")
 
-bot = telegram.Bot(token=TOKEN)
+# —————— 2) CHAT_ID'I GÜVENLİ PARSE ET ——————
+_chat_raw = os.getenv("TELEGRAM_CHAT_ID", "")
+if _chat_raw.isdigit():
+    CHAT_ID = int(_chat_raw)
+else:
+    CHAT_ID = 0
 
+# —————— 3) TELEGRAM BOT ——————
+bot = Bot(token=TOKEN)
+
+# —————— 4) Sembol & Zaman Çerçeveleri ——————
 symbols    = ["BTCUSDT", "ETHUSDT", "PEPEUSDT"]
 timeframes = ["15m", "1h", "4h", "1d"]
 
-# —————— 2) VERİ İNDİRME & GÖSTERGELER ——————
-
+# —————— 5) VERİ İNDİRME & GÖSTERGELER ——————
 def fetch_ohlc_binance(symbol, interval="30m", limit=500):
-    url = f"https://api.binance.com/api/v3/klines"
+    url = "https://api.binance.com/api/v3/klines"
     params = {"symbol": symbol, "interval": interval, "limit": limit}
     res = requests.get(url, params=params, timeout=10)
     res.raise_for_status()
@@ -80,8 +80,7 @@ def check_volume_spike(df):
     avg_vol = df["Volume"].iloc[-11:-1].mean()
     return df["Volume"].iloc[-1] > avg_vol * 1.2
 
-# —————— 3) SİNYAL ANALİZLERİ ——————
-
+# —————— 6) SİNYAL ANALİZLERİ ——————
 def analyze_single_timeframe(symbol, interval):
     try:
         df    = fetch_ohlc_binance(symbol, interval)
@@ -92,52 +91,45 @@ def analyze_single_timeframe(symbol, interval):
         ribbon= compute_ema_ribbon(df["Close"])
         spike = check_volume_spike(df)
 
-        bullish = sum([
-            atr >= price * 0.003,
-            rsi > 50,
-            macd > 0,
-            ribbon == "Bullish",
-            spike
-        ])
-        bearish = sum([
-            atr < price * 0.003,
-            rsi < 50,
-            macd < 0,
-            ribbon == "Bearish",
-            not spike
-        ])
+        bullish = sum([atr >= price * 0.003,
+                       rsi       > 50,
+                       macd      > 0,
+                       ribbon  == "Bullish",
+                       spike])
+        bearish = sum([atr <  price * 0.003,
+                       rsi      < 50,
+                       macd     < 0,
+                       ribbon == "Bearish",
+                       not spike])
 
         if bullish >= 3:    sig = "🟢 AL"
         elif bearish >= 3:  sig = "🔴 SAT"
         else:               sig = "🟡 BEKLE"
 
-        detail = (
-            f"{sig}\n"
-            f"    Price={price:.8f}\n"
-            f"    ATR={atr:.5f}\n"
-            f"    RSI={rsi:.1f}"
-            + ("\n    📈 Hacim Spike!" if spike else "")
-        )
+        detail = (f"{sig}\n"
+                  f"    Price={price:.8f}\n"
+                  f"    ATR={atr:.5f}\n"
+                  f"    RSI={rsi:.1f}"
+                  + ("\n    📈 Hacim Spike!" if spike else ""))
         return detail
 
     except Exception as e:
         return f"❗️ Hata: {e}"
 
 def analyze_multi_timeframes(symbol):
-    lines = [f"🔹 {symbol}"]
+    lines   = [f"🔹 {symbol}"]
     for tf in timeframes:
         lines.append(f"  {tf}: {analyze_single_timeframe(symbol, tf)}")
 
     signals = [analyze_single_timeframe(symbol, tf) for tf in timeframes]
-    if   all("AL" in s for s in signals):    final = "**🟢 GÜÇLÜ AL**"
-    elif all("SAT" in s for s in signals):   final = "**🔴 GÜÇLÜ SAT**"
-    else:                                    final = "**🟡 BEKLE**"
+    if   all("AL"  in s for s in signals): final = "**🟢 GÜÇLÜ AL**"
+    elif all("SAT" in s for s in signals): final = "**🔴 GÜÇLÜ SAT**"
+    else:                                  final = "**🟡 BEKLE**"
     lines.append(f"→ {final}")
 
     return "\n".join(lines)
 
-# —————— 4) TELEGRAM’A GÖNDERİM ——————
-
+# —————— 7) TELEGRAM’A GÖNDERİM ——————
 async def send_signals():
     now  = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     text = f"📊 MULTI-TIMEFRAME SİNYALLER - {now}\n\n"
@@ -145,8 +137,7 @@ async def send_signals():
         text += analyze_multi_timeframes(sym) + "\n\n"
     await bot.send_message(chat_id=CHAT_ID, text=text)
 
-# —————— 5) ANA DÖNGÜ ——————
-
+# —————— 8) ANA DÖNGÜ ——————
 async def run_loop():
     print("Bot çalışıyor… Her 30 dakikada sinyaller gönderilecek.")
     while True:
