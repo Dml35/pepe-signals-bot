@@ -4,3 +4,13 @@ python-telegram-bot
 tradingview-ta
 pandas
 numpy
+
+requirements.txt
+
+advanced_signal_bot.py
+
+send_signals.py
+
+check_alerts.py
+
+.github/workflows/bot.yml

@@ -1,165 +1,76 @@
-import os
-from dotenv import load_dotenv
-import requests
-import pandas as pd
-import numpy as np
-import datetime
-import asyncio
-from telegram import Bot
+#!/usr/bin/env python3
+# check_alerts.py
 
-# —— Ortam değişkenlerini yükle —— 
+import os
+import requests
+from telegram import Bot
+from dotenv import load_dotenv
+
+# 0) .env dosyasını yükle
 load_dotenv()
 
-# —— 1) Token ve API anahtarlarını al, temizle —— 
-TOKEN             = os.getenv("TELEGRAM_BOT_TOKEN", "").strip().replace("\n", "").replace("\r", "")
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "").strip().replace("\n", "").replace("\r", "")
+# 1) Ortam değişkenlerini oku ve temizle
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+CHAT_ID_RAW = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+PEPE_ALERT_LEVEL = os.getenv("PEPE_ALERT_LEVEL", "0").strip()
 
-# —— 2) CHAT_ID’i güvenli şekilde parse et —— 
-_chat_raw = os.getenv("TELEGRAM_CHAT_ID", "").strip().replace("\n", "").replace("\r", "")
-if _chat_raw.isdigit():
-    CHAT_ID = int(_chat_raw)
+# 2) CHAT_ID’i güvenli şekilde tamsayıya dönüştür
+if CHAT_ID_RAW.isdigit():
+    CHAT_ID = int(CHAT_ID_RAW)
 else:
-    CHAT_ID = 0  # Eğer geçersizse 0 olur, fonksiyon içinde kontrol edebilirsin
+    # Geçersizse gönderim yapmayacak
+    CHAT_ID = None
 
-# —— 3) Ortak HTTP header’ları (451 hatası için) —— 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/114.0.0.0 Safari/537.36"
-}
+# 3) Eşik değerini ondalıklı sayıya dönüştür
+try:
+    THRESHOLD = float(PEPE_ALERT_LEVEL)
+except ValueError:
+    THRESHOLD = 0.0
 
-# —— 4) Bot’u başlat —— 
+# 4) Bot’u başlat
 bot = Bot(token=TOKEN)
 
-# —— 5) Takip edilecek semboller ve zaman dilimleri —— 
-symbols    = ["BTCUSDT", "ETHUSDT", "PEPEUSDT"]
-timeframes = ["15m", "1h", "4h", "1d"]
-
-# —— 6) Binance’ten OHLC çekme fonksiyonu —— 
-def fetch_ohlc_binance(symbol, interval="15m", limit=500):
-    url    = "https://api.binance.com/api/v3/klines"
-    params = {"symbol": symbol, "interval": interval, "limit": limit}
-    res    = requests.get(url, params=params, headers=HEADERS, timeout=10)
-    res.raise_for_status()
-    data   = res.json()
-    df     = pd.DataFrame(data, columns=[
-        "Open Time","Open","High","Low","Close","Volume",
-        "Close Time","Quote Asset Volume","Number of Trades",
-        "Taker Buy Base","Taker Buy Quote","Ignore"
-    ])
-    df[["High","Low","Close","Volume"]] = df[["High","Low","Close","Volume"]].astype(float)
-    df["Time"] = pd.to_datetime(df["Close Time"], unit="ms")
-    return df
-
-# —— 7) Teknik indikatör hesapları —— 
-def compute_atr(df, period=14):
-    high, low = df["High"], df["Low"]
-    prev_close = df["Close"].shift(1)
-    tr1 = high - low
-    tr2 = (high - prev_close).abs()
-    tr3 = (low  - prev_close).abs()
-    tr  = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    return tr.rolling(window=period).mean().iloc[-1]
-
-def compute_rsi(series, period=14):
-    delta    = series.diff()
-    gain     = np.where(delta > 0, delta, 0)
-    loss     = np.where(delta < 0, -delta, 0)
-    avg_gain = pd.Series(gain).rolling(window=period).mean()
-    avg_loss = pd.Series(loss).rolling(window=period).mean()
-    rs       = avg_gain / avg_loss
-    return (100 - (100 / (1 + rs))).iloc[-1]
-
-def compute_macd_histogram(series):
-    ema12  = series.ewm(span=12, adjust=False).mean()
-    ema26  = series.ewm(span=26, adjust=False).mean()
-    macd   = ema12 - ema26
-    signal = macd.ewm(span=9, adjust=False).mean()
-    return (macd - signal).iloc[-1]
-
-def compute_ema_ribbon(series):
-    spans = [20,25,30,35,40,45,50,55]
-    emas  = [series.ewm(span=s, adjust=False).mean().iloc[-1] for s in spans]
-    if all(emas[i] > emas[i+1] for i in range(len(emas)-1)):
-        return "Bullish"
-    if all(emas[i] < emas[i+1] for i in range(len(emas)-1)):
-        return "Bearish"
-    return "Neutral"
-
-def check_volume_spike(df):
-    avg_vol = df["Volume"].iloc[-11:-1].mean()
-    return df["Volume"].iloc[-1] > avg_vol * 1.2
-
-# —— 8) Tek zaman dilimi analizi —— 
-def analyze_single_timeframe(symbol, interval):
+def main():
+    # 5) Fiyatı Binance API’dan çek
     try:
-        df     = fetch_ohlc_binance(symbol, interval)
-        price  = df["Close"].iloc[-1]
-        atr    = compute_atr(df)
-        rsi    = compute_rsi(df["Close"])
-        macd   = compute_macd_histogram(df["Close"])
-        ribbon = compute_ema_ribbon(df["Close"])
-        spike  = check_volume_spike(df)
-
-        bullish = sum([atr >= price * 0.003, rsi > 50, macd > 0, ribbon == "Bullish", spike])
-        bearish = sum([atr <  price * 0.003, rsi < 50, macd < 0, ribbon == "Bearish", not spike])
-
-        if bullish >= 3:
-            sig = "🟢 AL"
-        elif bearish >= 3:
-            sig = "🔴 SAT"
-        else:
-            sig = "🟡 BEKLE"
-
-        detail  = (
-            f"{sig}\n"
-            f"    Price={price:.8f}\n"
-            f"    ATR={atr:.5f}\n"
-            f"    RSI={rsi:.1f}"
-            + ("\n    📈 Hacim Spike!" if spike else "")
+        resp = requests.get(
+            "https://api.binance.com/api/v3/ticker/price",
+            params={"symbol": "PEPEUSDT"},
+            timeout=10
         )
-        return detail
-
+        resp.raise_for_status()
+        data = resp.json()
     except Exception as e:
-        return f"❗️ Hata: {e}"
-
-# —— 9) Çoklu zaman dilimleri birleştirme —— 
-def analyze_multi_timeframes(symbol):
-    lines = [f"🔹 {symbol}"]
-    signals = []
-    for tf in timeframes:
-        detail = analyze_single_timeframe(symbol, tf)
-        lines.append(f"  {tf}: {detail}")
-        signals.append(detail)
-
-    if all("AL"  in s for s in signals):
-        final = "**🟢 GÜÇLÜ AL**"
-    elif all("SAT" in s for s in signals):
-        final = "**🔴 GÜÇLÜ SAT**"
-    else:
-        final = "**🟡 BEKLE**"
-
-    lines.append(f"→ {final}")
-    return "\n".join(lines)
-
-# —— 10) Telegram’a mesaj gönderme —— 
-async def send_signals():
-    if not TOKEN or not CHAT_ID:
-        print("⚠️ Telegram token veya chat_id eksik!")
+        print(f"❗️ API isteği hatası: {e}")
         return
 
-    now  = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    text = f"📊 MULTI-TIMEFRAME SİNYALLER - {now}\n\n"
-    for sym in symbols:
-        text += analyze_multi_timeframes(sym) + "\n\n"
-    await bot.send_message(chat_id=CHAT_ID, text=text)
+    # 6) JSON’da price anahtarı var mı kontrol et
+    price_str = data.get("price")
+    if price_str is None:
+        print(f"❗️ 'price' bulunamadı, dönen veri: {data}")
+        return
 
-# —— 11) 30 dakikada bir döngü —— 
-async def run_loop():
-    print("Bot çalışıyor… Her 30 dakikada sinyaller gönderilecek.")
-    while True:
-        await send_signals()
-        await asyncio.sleep(1800)
+    # 7) Ondalıklı sayıya çevir
+    try:
+        price = float(price_str)
+    except ValueError:
+        print(f"❗️ 'price' dönüştürülemedi: {price_str}")
+        return
+
+    print(f"📊 PEPE fiyatı: {price:.8f} USDT (Eşik={THRESHOLD:.8f})")
+
+    # 8) Eşik altındaysa ve CHAT_ID geçerliyse Telegram’a gönder
+    if CHAT_ID and price <= THRESHOLD:
+        try:
+            bot.send_message(
+                chat_id=CHAT_ID,
+                text=f"🚨 PEPE düştü: {price:.8f} USDT (Eşik: {THRESHOLD:.8f})"
+            )
+            print("✅ Uyarı gönderildi.")
+        except Exception as e:
+            print(f"❗️ Telegram gönderim hatası: {e}")
+    else:
+        print("ℹ️ Fiyat eşiğin üzerinde veya CHAT_ID geçersiz.")
 
 if __name__ == "__main__":
-    asyncio.run(run_loop())
+    main()
