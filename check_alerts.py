@@ -1,16 +1,28 @@
-import os, requests
+import os
+import requests
 from dotenv import load_dotenv
 from telegram import Bot
 
+# .env dosyasını yükle (yerelde test için)
 load_dotenv()
-bot     = Bot(token=os.getenv("8019185982:AAFdCNB1hsaK2C3Q3Em6a8UVB6ZZaoKuoH8"))
-chat_id = int(os.getenv("845299770"))
+
+# 1) ENV VAR’LARI İSİM ÜZERİNDEN AL
+TOKEN     = os.getenv("TELEGRAM_BOT_TOKEN", "")
+CHAT_RAW  = os.getenv("TELEGRAM_CHAT_ID", "0")
 threshold = float(os.getenv("PEPE_ALERT_LEVEL", "0.00000720"))
 
+# 2) CHAT_ID’I GÜVENLİ PARSE ET
+chat_id = int(CHAT_RAW) if CHAT_RAW.isdigit() else 0
+
+# 3) Bot’u başlat
+bot = Bot(token=TOKEN)
+
+# 4) Fiyatı çek ve eşiği kontrol et
 price = float(requests.get(
     "https://api.binance.com/api/v3/ticker/price",
-    params={"symbol":"PEPEUSDT"}
+    params={"symbol": "PEPEUSDT"},
+    timeout=10
 ).json()["price"])
 
 if price <= threshold:
-    bot.send_message(chat_id, f"🚨 PEPE düştü: {price:.8f} USDT")
+    bot.send_message(chat_id=chat_id, text=f"🚨 PEPE düştü: {price:.8f} USDT")
