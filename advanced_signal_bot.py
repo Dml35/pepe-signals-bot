@@ -7,35 +7,35 @@ import datetime
 import asyncio
 from telegram import Bot
 
-# —————— 0) .env DOSYASINI YÜKLE ——————
+# —————— 0) .env dosyasını yükle ——————
 load_dotenv()
 
-# —————— 1) AYARLAR ——————
-TOKEN             = os.getenv("TELEGRAM_BOT_TOKEN", "")
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")
+# —————— 1) Ayarları al ve temizle ——————
+TOKEN             = os.getenv("TELEGRAM_BOT_TOKEN", "")   .strip()
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")   .strip()
 
-# —————— 2) CHAT_ID'I GÜVENLİ PARSE ET ——————
-_chat_raw = os.getenv("TELEGRAM_CHAT_ID", "")
+# —————— 2) CHAT_ID’i güvenli parse et ——————
+_chat_raw = os.getenv("TELEGRAM_CHAT_ID", "") .strip()
 if _chat_raw.isdigit():
     CHAT_ID = int(_chat_raw)
 else:
     CHAT_ID = 0
 
-# —————— 3) TELEGRAM BOT ——————
+# —————— 3) Bot’u başlat ——————
 bot = Bot(token=TOKEN)
 
-# —————— 4) Sembol & Zaman Çerçeveleri ——————
+# —————— 4) Sembol ve zaman dilimleri ——————
 symbols    = ["BTCUSDT", "ETHUSDT", "PEPEUSDT"]
 timeframes = ["15m", "1h", "4h", "1d"]
 
-# —————— 5) VERİ İNDİRME & GÖSTERGELER ——————
+# —————— 5) Veri çekme & indikatörler ——————
 def fetch_ohlc_binance(symbol, interval="30m", limit=500):
-    url = "https://api.binance.com/api/v3/klines"
+    url    = "https://api.binance.com/api/v3/klines"
     params = {"symbol": symbol, "interval": interval, "limit": limit}
-    res = requests.get(url, params=params, timeout=10)
+    res    = requests.get(url, params=params, timeout=10)
     res.raise_for_status()
-    data = res.json()
-    df = pd.DataFrame(data, columns=[
+    data   = res.json()
+    df     = pd.DataFrame(data, columns=[
         "Open Time","Open","High","Low","Close","Volume",
         "Close Time","Quote Asset Volume","Number of Trades",
         "Taker Buy Base","Taker Buy Quote","Ignore"
@@ -45,72 +45,83 @@ def fetch_ohlc_binance(symbol, interval="30m", limit=500):
     return df
 
 def compute_atr(df, period=14):
-    high, low = df["High"], df["Low"]
+    high, low  = df["High"], df["Low"]
     prev_close = df["Close"].shift(1)
     tr1 = high - low
     tr2 = (high - prev_close).abs()
-    tr3 = (low - prev_close).abs()
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    tr3 = (low  - prev_close).abs()
+    tr  = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(window=period).mean().iloc[-1]
 
 def compute_rsi(series, period=14):
-    delta = series.diff()
-    gain  = np.where(delta > 0, delta, 0)
-    loss  = np.where(delta < 0, -delta, 0)
+    delta    = series.diff()
+    gain     = np.where(delta > 0, delta, 0)
+    loss     = np.where(delta < 0, -delta, 0)
     avg_gain = pd.Series(gain).rolling(window=period).mean()
     avg_loss = pd.Series(loss).rolling(window=period).mean()
-    rs = avg_gain / avg_loss
+    rs       = avg_gain / avg_loss
     return (100 - (100 / (1 + rs))).iloc[-1]
 
 def compute_macd_histogram(series):
-    ema12  = series.ewm(span=12, adjust=False).mean()
-    ema26  = series.ewm(span=26, adjust=False).mean()
-    macd   = ema12 - ema26
-    signal = macd.ewm(span=9, adjust=False).mean()
+    ema12   = series.ewm(span=12, adjust=False).mean()
+    ema26   = series.ewm(span=26, adjust=False).mean()
+    macd    = ema12 - ema26
+    signal  = macd.ewm(span=9, adjust=False).mean()
     return (macd - signal).iloc[-1]
 
 def compute_ema_ribbon(series):
     spans = [20,25,30,35,40,45,50,55]
-    emas = [series.ewm(span=s, adjust=False).mean().iloc[-1] for s in spans]
-    if all(emas[i] > emas[i+1] for i in range(len(emas)-1)): return "Bullish"
-    if all(emas[i] < emas[i+1] for i in range(len(emas)-1)): return "Bearish"
+    emas  = [series.ewm(span=s, adjust=False).mean().iloc[-1] for s in spans]
+    if all(emas[i] > emas[i+1] for i in range(len(emas)-1)):
+        return "Bullish"
+    if all(emas[i] < emas[i+1] for i in range(len(emas)-1)):
+        return "Bearish"
     return "Neutral"
 
 def check_volume_spike(df):
     avg_vol = df["Volume"].iloc[-11:-1].mean()
     return df["Volume"].iloc[-1] > avg_vol * 1.2
 
-# —————— 6) SİNYAL ANALİZLERİ ——————
+# —————— 6) Sinyal Analizleri ——————
 def analyze_single_timeframe(symbol, interval):
     try:
-        df    = fetch_ohlc_binance(symbol, interval)
-        price = df["Close"].iloc[-1]
-        atr   = compute_atr(df)
-        rsi   = compute_rsi(df["Close"])
-        macd  = compute_macd_histogram(df["Close"])
-        ribbon= compute_ema_ribbon(df["Close"])
-        spike = check_volume_spike(df)
+        df     = fetch_ohlc_binance(symbol, interval)
+        price  = df["Close"].iloc[-1]
+        atr    = compute_atr(df)
+        rsi    = compute_rsi(df["Close"])
+        macd   = compute_macd_histogram(df["Close"])
+        ribbon = compute_ema_ribbon(df["Close"])
+        spike  = check_volume_spike(df)
 
-        bullish = sum([atr >= price * 0.003,
-                       rsi       > 50,
-                       macd      > 0,
-                       ribbon  == "Bullish",
-                       spike])
-        bearish = sum([atr <  price * 0.003,
-                       rsi      < 50,
-                       macd     < 0,
-                       ribbon == "Bearish",
-                       not spike])
+        bullish = sum([
+            atr    >= price * 0.003,
+            rsi    >  50,
+            macd   >  0,
+            ribbon == "Bullish",
+            spike
+        ])
+        bearish = sum([
+            atr    <  price * 0.003,
+            rsi    <  50,
+            macd   <  0,
+            ribbon == "Bearish",
+            not spike
+        ])
 
-        if bullish >= 3:    sig = "🟢 AL"
-        elif bearish >= 3:  sig = "🔴 SAT"
-        else:               sig = "🟡 BEKLE"
+        if bullish >= 3:
+            sig = "🟢 AL"
+        elif bearish >= 3:
+            sig = "🔴 SAT"
+        else:
+            sig = "🟡 BEKLE"
 
-        detail = (f"{sig}\n"
-                  f"    Price={price:.8f}\n"
-                  f"    ATR={atr:.5f}\n"
-                  f"    RSI={rsi:.1f}"
-                  + ("\n    📈 Hacim Spike!" if spike else ""))
+        detail  = (
+            f"{sig}\n"
+            f"    Price={price:.8f}\n"
+            f"    ATR={atr:.5f}\n"
+            f"    RSI={rsi:.1f}"
+            + ("\n    📈 Hacim Spike!" if spike else "")
+        )
         return detail
 
     except Exception as e:
@@ -122,14 +133,17 @@ def analyze_multi_timeframes(symbol):
         lines.append(f"  {tf}: {analyze_single_timeframe(symbol, tf)}")
 
     signals = [analyze_single_timeframe(symbol, tf) for tf in timeframes]
-    if   all("AL"  in s for s in signals): final = "**🟢 GÜÇLÜ AL**"
-    elif all("SAT" in s for s in signals): final = "**🔴 GÜÇLÜ SAT**"
-    else:                                  final = "**🟡 BEKLE**"
-    lines.append(f"→ {final}")
+    if   all("AL"  in s for s in signals):
+        final = "**🟢 GÜÇLÜ AL**"
+    elif all("SAT" in s for s in signals):
+        final = "**🔴 GÜÇLÜ SAT**"
+    else:
+        final = "**🟡 BEKLE**"
 
+    lines.append(f"→ {final}")
     return "\n".join(lines)
 
-# —————— 7) TELEGRAM’A GÖNDERİM ——————
+# —————— 7) Telegram’a Gönderim ——————
 async def send_signals():
     now  = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     text = f"📊 MULTI-TIMEFRAME SİNYALLER - {now}\n\n"
@@ -137,7 +151,7 @@ async def send_signals():
         text += analyze_multi_timeframes(sym) + "\n\n"
     await bot.send_message(chat_id=CHAT_ID, text=text)
 
-# —————— 8) ANA DÖNGÜ ——————
+# —————— 8) Ana Döngü ——————
 async def run_loop():
     print("Bot çalışıyor… Her 30 dakikada sinyaller gönderilecek.")
     while True:
