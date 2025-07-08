@@ -11,11 +11,12 @@ from telegram import Bot
 load_dotenv()
 
 # —————— 1) Ayarları al ve temizle ——————
-TOKEN             = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "").strip()
+# Hem baş/son boşlukları, hem satır sonlarını tamamen atıyoruz
+TOKEN             = os.getenv("TELEGRAM_BOT_TOKEN", "").strip().replace("\n", "").replace("\r", "")
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "").strip().replace("\n", "").replace("\r", "")
 
 # —————— 2) CHAT_ID’i güvenli parse et ——————
-_chat_raw = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+_chat_raw = os.getenv("TELEGRAM_CHAT_ID", "").strip().replace("\n", "").replace("\r", "")
 if _chat_raw.isdigit():
     CHAT_ID = int(_chat_raw)
 else:
