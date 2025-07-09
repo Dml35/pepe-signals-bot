@@ -6,18 +6,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-TOKEN       = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-CHAT_ID_RAW = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+# Env’ler
+TOKEN_RAW   = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+CHAT_RAW    = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
-if CHAT_ID_RAW.isdigit():
-    CHAT_ID = int(CHAT_ID_RAW)
-else:
+if not TOKEN_RAW:
+    raise RuntimeError("❌ TELEGRAM_BOT_TOKEN boş!")
+TOKEN = TOKEN_RAW
+
+try:
+    CHAT_ID = int(CHAT_RAW)
+except ValueError:
     CHAT_ID = None
 
 bot = Bot(token=TOKEN)
 
 def main():
-    # örnek alert: 1₺ altındaki BTC alarımı
     symbol = "BTCUSDT"
     url = "https://api.binance.com/api/v3/ticker/price"
     try:
@@ -29,25 +33,22 @@ def main():
         return
 
     price_str = data.get("price")
-    if not price_str:
+    if price_str is None:
         print("❗️ 'price' yok, veri:", data)
         return
 
     try:
         price = float(price_str)
-    except:
+    except ValueError:
         print("❗️ 'price' parse hatası:", price_str)
         return
 
-    print(f"📊 {symbol} = {price:.8f} USDT")
-    # örnek eşik:
+    print(f"📊 {symbol} fiyatı: {price:.8f} USDT")
     alert_level = 10000.0
     if CHAT_ID and price <= alert_level:
+        text = f"⚠️ {symbol} {price:.8f} USDT’ye düştü! (Eşik: {alert_level})"
         try:
-            bot.send_message(
-                chat_id=CHAT_ID,
-                text=f"⚠️ {symbol} {price:.8f} USDT’ye düştü! (Eşik: {alert_level})"
-            )
+            bot.send_message(chat_id=CHAT_ID, text=text)
             print("✅ Alert gönderildi.")
         except Exception as e:
             print("❗️ Telegram gönderim hatası:", e)

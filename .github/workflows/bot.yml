@@ -1,9 +1,10 @@
 name: PEPE Signals & Alerts
 
+# 10 dakikada bir çalışsın
 on:
-  workflow_dispatch:
   schedule:
     - cron: '*/10 * * * *'
+  workflow_dispatch:
 
 jobs:
   send_signals:
@@ -13,27 +14,22 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: '3.x'
-      - run: pip install --upgrade pip
-      - run: pip install -r requirements.txt
-      - name: Send Signals
-        run: python send_signals.py
+      - run: pip install --no-cache-dir -r requirements.txt
+      - run: python send_signals.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
-          PEPE_ALERT_LEVEL:    ${{ secrets.PEPE_ALERT_LEVEL }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PEPE_ALERT_LEVEL: ${{ secrets.PEPE_ALERT_LEVEL }}
 
   check_alerts:
-    if: success()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
         with:
           python-version: '3.x'
-      - run: pip install --upgrade pip
-      - run: pip install -r requirements.txt
-      - name: Check Alerts
-        run: python check_alerts.py
+      - run: pip install --no-cache-dir -r requirements.txt
+      - run: python check_alerts.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
