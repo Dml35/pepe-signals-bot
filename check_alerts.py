@@ -1,28 +1,58 @@
+#!/usr/bin/env python3
 import os
 import requests
-from dotenv import load_dotenv
 from telegram import Bot
+from dotenv import load_dotenv
 
 load_dotenv()
 
-# 1) ENV VARLARI İSİM ÜZERİNDEN ÇEK
-TOKEN     = os.getenv("TELEGRAM_BOT_TOKEN", "")
-CHAT_RAW  = os.getenv("TELEGRAM_CHAT_ID", "0")
-threshold = float(os.getenv("PEPE_ALERT_LEVEL", "0.00000720"))
+TOKEN       = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+CHAT_ID_RAW = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
-# 2) CHAT_ID’I GÜVENLİCE İNTEĞERE ÇEVİR
-chat_id = int(CHAT_RAW) if CHAT_RAW.isdigit() else 0
+if CHAT_ID_RAW.isdigit():
+    CHAT_ID = int(CHAT_ID_RAW)
+else:
+    CHAT_ID = None
 
-# 3) BOT’U BAŞLAT
 bot = Bot(token=TOKEN)
 
-# 4) FİYATI ÇEK VE EŞİĞİ DENETLE
-price = float(requests.get(
-    "https://api.binance.com/api/v3/ticker/price",
-    params={"symbol": "PEPEUSDT"},
-    timeout=10
-).json()["price"])
+def main():
+    # örnek alert: 1₺ altındaki BTC alarımı
+    symbol = "BTCUSDT"
+    url = "https://api.binance.com/api/v3/ticker/price"
+    try:
+        r = requests.get(url, params={"symbol": symbol}, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        print("❗️ API isteği hatası:", e)
+        return
 
-if price <= threshold:
-    bot.send_message(chat_id=chat_id,
-                     text=f"🚨 PEPE düştü: {price:.8f} USDT")
+    price_str = data.get("price")
+    if not price_str:
+        print("❗️ 'price' yok, veri:", data)
+        return
+
+    try:
+        price = float(price_str)
+    except:
+        print("❗️ 'price' parse hatası:", price_str)
+        return
+
+    print(f"📊 {symbol} = {price:.8f} USDT")
+    # örnek eşik:
+    alert_level = 10000.0
+    if CHAT_ID and price <= alert_level:
+        try:
+            bot.send_message(
+                chat_id=CHAT_ID,
+                text=f"⚠️ {symbol} {price:.8f} USDT’ye düştü! (Eşik: {alert_level})"
+            )
+            print("✅ Alert gönderildi.")
+        except Exception as e:
+            print("❗️ Telegram gönderim hatası:", e)
+    else:
+        print("ℹ️ Fiyat eşiğin üzerinde veya CHAT_ID geçersiz.")
+
+if __name__ == "__main__":
+    main()
