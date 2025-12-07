@@ -3,6 +3,7 @@ import os
 import requests
 from telegram import Bot
 from dotenv import load_dotenv
+from typing import Optional
 
 load_dotenv()  # Local’da .env’den, CI’da env’den çeker
 
@@ -31,7 +32,7 @@ except ValueError:
 
 bot = Bot(token=TOKEN)
 
-def get_pepe_price() -> float | None:
+def get_pepe_price() -> Optional[float]:
     url = "https://api.binance.com/api/v3/ticker/price"
     params = {"symbol": "PEPEUSDT"}
     try:
